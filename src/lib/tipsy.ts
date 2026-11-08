@@ -11,7 +11,8 @@ export interface OrderedVote {
   id: string;
   position: number;
   voteCount: number;
-  addedAt: string;
+  addedAt?: string;
+  added_at?: string;
 }
 
 export interface PlaybackSnapshot {
@@ -71,7 +72,7 @@ export function orderQueueByVotes<T extends OrderedVote>(tracks: T[]): T[] {
     return (
       right.voteCount - left.voteCount ||
       left.position - right.position ||
-      left.addedAt.localeCompare(right.addedAt)
+      (left.addedAt ?? left.added_at ?? "").localeCompare(right.addedAt ?? right.added_at ?? "")
     );
   });
 }
