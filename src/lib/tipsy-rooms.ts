@@ -179,7 +179,7 @@ export async function chooseCurrentTrack(roomId: string, tracks: QueueTrack[], r
     if (error) throw error;
   }
 
-  await savePlayback(roomId, nextCurrent?.id ?? null, Boolean(nextCurrent), 0);
+  await savePlayback(roomId, nextCurrent?.id ?? null, false, 0);
 }
 
 export async function moveQueueTrack(roomId: string, tracks: QueueTrack[], trackId: string, offset: -1 | 1) {

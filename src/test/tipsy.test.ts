@@ -25,4 +25,9 @@ describe("Tipsy Bar room rules", () => {
       getSynchronizedPosition({ ...started, isPlaying: false }, Date.parse(started.updatedAt) + 6500),
     ).toBe(42);
   });
+
+  it("does not advance shared time while a newly selected track is paused", () => {
+    const selectedTrack = { isPlaying: false, positionSeconds: 0, updatedAt: "2026-05-01T00:00:00.000Z" };
+    expect(getSynchronizedPosition(selectedTrack, Date.parse(selectedTrack.updatedAt) + 15000)).toBe(0);
+  });
 });
