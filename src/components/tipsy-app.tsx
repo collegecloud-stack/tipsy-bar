@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowDown,
@@ -48,6 +48,10 @@ import { supabase } from "@/integrations/supabase/client";
 
 type Visitor = { id: string; nickname: string };
 type PresenceMember = { visitor_id?: string; nickname?: string };
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
 
 interface TipsyAppProps {
   initialRoomCode?: string;
@@ -68,7 +72,13 @@ function Waveform({ playing }: { playing: boolean }) {
   return (
     <div className={`waveform ${playing ? "waveform-playing" : ""}`} aria-label={playing ? "Music playing" : "Playback paused"}>
       {Array.from({ length: 34 }, (_, index) => (
-        <span key={index} style={{ "--wave-index": index } as React.CSSProperties} />
+        <span
+          key={index}
+          style={{
+            "--wave-index": index,
+            height: `${8 + ((index * 19) % 17)}px`,
+          } as CSSProperties}
+        />
       ))}
     </div>
   );
@@ -92,6 +102,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
   const [nowMs, setNowMs] = useState(0);
   const [copied, setCopied] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const enterRoomRef = useRef<(code: string, name: string, identity: Visitor) => Promise<void>>(async () => {});
 
@@ -104,8 +115,8 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
   const isPlaying = playback?.is_playing ?? false;
   const youtubeSrc = useMemo(() => {
     if (!currentTrack || currentTrack.source !== "youtube") return "";
-    return getYouTubeEmbedUrl(currentTrack.source_id, positionSeconds);
-  }, [currentTrack?.id, playback?.updated_at, currentTrack?.source_id, positionSeconds > 0 ? Math.floor(positionSeconds) : 0]);
+    return getYouTubeEmbedUrl(currentTrack.source_id, playback?.position_seconds ?? 0, isPlaying);
+  }, [currentTrack?.id, playback?.updated_at, currentTrack?.source_id, isPlaying]);
 
   useEffect(() => {
     const identity = getVisitorIdentity();
@@ -114,6 +125,27 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     setNowMs(Date.now());
     if (!initialRoomCode || !identity.nickname.trim()) setLoadingRoom(false);
   }, [initialRoomCode]);
+
+  useEffect(() => {
+    const handleInstallAvailable = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", handleInstallAvailable);
+    return () => window.removeEventListener("beforeinstallprompt", handleInstallAvailable);
+  }, []);
+
+  const handleInstall = async () => {
+    if (installPrompt) {
+      await installPrompt.prompt();
+      await installPrompt.userChoice;
+      setInstallPrompt(null);
+      return;
+    }
+    toast.info("On iPhone or iPad, tap Share, then Add to Home Screen.", {
+      description: "Screen-off playback depends on the music app and browser; it isn’t guaranteed here.",
+    });
+  };
 
   const enterRoom = useCallback(async (code: string, name: string, identity: Visitor) => {
     setErrorMessage("");
@@ -222,7 +254,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     return () => window.clearInterval(interval);
   }, [currentTrack?.id, isPlaying, playback?.updated_at, nowMs > 0]);
 
-  const createNewRoom = async (event: React.FormEvent<HTMLFormElement>) => {
+  const createNewRoom = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!visitor) return;
     setErrorMessage("");
@@ -246,7 +278,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     }
   };
 
-  const handleJoin = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleJoin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!visitor) return;
     await enterRoom(roomCodeInput, nickname, visitor);
@@ -296,7 +328,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     }
   };
 
-  const handleAddTrack = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleAddTrack = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!room || !member || !trackUrl.trim()) return;
     const parsed = parseTrackUrl(trackUrl);
@@ -642,7 +674,10 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
             <span className="grid h-11 w-11 place-items-center rounded-xl border border-neon/30 bg-neon/10 text-neon"><Disc3 className="h-5 w-5" /></span>
             <span><span className="block text-base font-extrabold text-foreground">TIPSY <span className="text-neon">BAR</span></span><span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">The room is the dance floor</span></span>
           </div>
-          <span className="flex items-center gap-2 rounded-full border border-line bg-panel px-3 py-2 text-[11px] font-semibold text-muted-foreground"><span className="live-dot" /> Listening rooms</span>
+          <div className="flex items-center gap-2">
+            {(installPrompt || /iPhone|iPad|iPod/.test(typeof navigator === "undefined" ? "" : navigator.userAgent)) && <Button type="button" variant="outline" size="sm" onClick={() => void handleInstall()} className="h-9 border-line bg-panel px-3 text-xs text-foreground hover:border-neon/50 hover:bg-panel-raised">Install</Button>}
+            <span className="flex items-center gap-2 rounded-full border border-line bg-panel px-3 py-2 text-[11px] font-semibold text-muted-foreground"><span className="live-dot" /> Listening rooms</span>
+          </div>
         </header>
 
         <div className="grid flex-1 items-center gap-12 py-9 lg:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.85fr)] lg:gap-20 lg:py-14">

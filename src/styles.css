@@ -164,7 +164,7 @@
 @keyframes tipsy-wave {
   0%,
   100% { transform: scaleY(0.32); opacity: 0.56; }
-  50% { transform: scaleY(calc(0.38 + ((var(--wave-index) * 17) % 63) / 100)); opacity: 1; }
+  50% { transform: scaleY(1); opacity: 1; }
 }
 
 .tipsy-shell {
