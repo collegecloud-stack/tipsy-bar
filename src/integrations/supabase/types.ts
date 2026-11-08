@@ -14,7 +14,208 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      room_members: {
+        Row: {
+          id: string
+          joined_at: string
+          nickname: string
+          room_id: string
+          visitor_id: string
+        }
+        Insert: {
+          id?: string
+          joined_at?: string
+          nickname: string
+          room_id: string
+          visitor_id: string
+        }
+        Update: {
+          id?: string
+          joined_at?: string
+          nickname?: string
+          room_id?: string
+          visitor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_members_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "rooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      room_playback: {
+        Row: {
+          is_playing: boolean
+          position_seconds: number
+          room_id: string
+          track_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          is_playing?: boolean
+          position_seconds?: number
+          room_id: string
+          track_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          is_playing?: boolean
+          position_seconds?: number
+          room_id?: string
+          track_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_playback_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: true
+            referencedRelation: "rooms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "room_playback_track_id_fkey"
+            columns: ["track_id"]
+            isOneToOne: false
+            referencedRelation: "room_tracks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      room_tracks: {
+        Row: {
+          added_at: string
+          added_by: string | null
+          artist: string
+          artwork_url: string | null
+          duration_seconds: number | null
+          id: string
+          position: number
+          room_id: string
+          source: string
+          source_id: string
+          title: string
+          track_url: string
+        }
+        Insert: {
+          added_at?: string
+          added_by?: string | null
+          artist?: string
+          artwork_url?: string | null
+          duration_seconds?: number | null
+          id?: string
+          position?: number
+          room_id: string
+          source: string
+          source_id: string
+          title: string
+          track_url: string
+        }
+        Update: {
+          added_at?: string
+          added_by?: string | null
+          artist?: string
+          artwork_url?: string | null
+          duration_seconds?: number | null
+          id?: string
+          position?: number
+          room_id?: string
+          source?: string
+          source_id?: string
+          title?: string
+          track_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_tracks_added_by_fkey"
+            columns: ["added_by"]
+            isOneToOne: false
+            referencedRelation: "room_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "room_tracks_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "rooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rooms: {
+        Row: {
+          code: string
+          created_at: string
+          host_member_id: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          code?: string
+          created_at?: string
+          host_member_id?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          host_member_id?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rooms_host_member_fk"
+            columns: ["host_member_id"]
+            isOneToOne: false
+            referencedRelation: "room_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      track_votes: {
+        Row: {
+          created_at: string
+          id: string
+          room_id: string
+          track_id: string
+          voter_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          room_id: string
+          track_id: string
+          voter_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          room_id?: string
+          track_id?: string
+          voter_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "track_votes_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "rooms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "track_votes_track_id_fkey"
+            columns: ["track_id"]
+            isOneToOne: false
+            referencedRelation: "room_tracks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
