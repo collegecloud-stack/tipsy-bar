@@ -1,3 +1,4 @@
 - [ ] Build public guest room creation/join, queue, votes, and synchronized YouTube playback UI.
-- [ ] Add Lovable Cloud tables, room persistence, RLS, realtime, and optional saved profiles.
+- [ ] Add Lovable Cloud tables, room persistence, RLS, realtime, and optional saved profiles (accounts remain deferred).
+- [ ] Add home-screen installation metadata and icons; no offline or guaranteed screen-off playback.
 - [ ] Verify queue/playback rules with tests and preview guest flow.
