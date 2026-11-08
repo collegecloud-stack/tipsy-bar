@@ -83,9 +83,9 @@ export function getSynchronizedPosition(snapshot: PlaybackSnapshot, nowMs: numbe
   return Math.max(0, snapshot.positionSeconds + elapsedSeconds);
 }
 
-export function getYouTubeEmbedUrl(videoId: string, startSeconds: number): string {
+export function getYouTubeEmbedUrl(videoId: string, startSeconds: number, isPlaying = false): string {
   const url = new URL(`https://www.youtube-nocookie.com/embed/${videoId}`);
-  url.searchParams.set("autoplay", "1");
+  url.searchParams.set("autoplay", isPlaying ? "1" : "0");
   url.searchParams.set("playsinline", "1");
   url.searchParams.set("enablejsapi", "1");
   url.searchParams.set("start", String(Math.max(0, Math.floor(startSeconds))));
