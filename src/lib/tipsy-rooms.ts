@@ -187,7 +187,11 @@ export async function moveQueueTrack(roomId: string, tracks: QueueTrack[], track
   const index = ordered.findIndex((track) => track.id === trackId);
   const targetIndex = index + offset;
   if (index < 0 || targetIndex < 0 || targetIndex >= ordered.length) return;
-  [ordered[index], ordered[targetIndex]] = [ordered[targetIndex], ordered[index]];
+  const selected = ordered[index];
+  const target = ordered[targetIndex];
+  if (!selected || !target) return;
+  ordered[index] = target;
+  ordered[targetIndex] = selected;
   for (const [position, track] of ordered.entries()) {
     const { error } = await supabase.from("room_tracks").update({ position: position + 1 }).eq("id", track.id);
     if (error) throw error;
