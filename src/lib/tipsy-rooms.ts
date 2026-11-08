@@ -150,14 +150,14 @@ export async function toggleTrackVote(roomId: string, trackId: string, visitorId
 }
 
 export async function savePlayback(roomId: string, trackId: string | null, isPlaying: boolean, positionSeconds: number) {
-  const { error } = await supabase.from("room_playback").upsert({
+  const { data, error } = await supabase.from("room_playback").upsert({
     room_id: roomId,
     track_id: trackId,
     is_playing: isPlaying,
     position_seconds: Math.max(0, positionSeconds),
-    updated_at: new Date().toISOString(),
-  });
+  }).select().single();
   if (error) throw error;
+  return data;
 }
 
 export async function chooseCurrentTrack(roomId: string, tracks: QueueTrack[], requestedTrackId?: string) {
@@ -179,13 +179,13 @@ export async function chooseCurrentTrack(roomId: string, tracks: QueueTrack[], r
 }
 
 export async function moveQueueTrack(roomId: string, tracks: QueueTrack[], trackId: string, offset: -1 | 1) {
-  const ordered = orderQueueByVotes(tracks);
+  const ordered = orderQueueByVotes(tracks).filter((track) => track.position !== 0);
   const index = ordered.findIndex((track) => track.id === trackId);
   const targetIndex = index + offset;
-  if (index <= 0 || targetIndex <= 0 || targetIndex >= ordered.length) return;
+  if (index < 0 || targetIndex < 0 || targetIndex >= ordered.length) return;
   [ordered[index], ordered[targetIndex]] = [ordered[targetIndex], ordered[index]];
   for (const [position, track] of ordered.entries()) {
-    const { error } = await supabase.from("room_tracks").update({ position }).eq("id", track.id);
+    const { error } = await supabase.from("room_tracks").update({ position: position + 1 }).eq("id", track.id);
     if (error) throw error;
   }
 }

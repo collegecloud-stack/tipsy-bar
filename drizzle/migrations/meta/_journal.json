@@ -8,6 +8,13 @@
       "when": 1794113866470,
       "tag": "0000_create_tipsy_bar_rooms",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794114673754,
+      "tag": "0001_server_clock_room_playback",
+      "breakpoints": true
     }
   ]
 }

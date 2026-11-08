@@ -103,6 +103,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
   const [copied, setCopied] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isIosDevice, setIsIosDevice] = useState(false);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const enterRoomRef = useRef<(code: string, name: string, identity: Visitor) => Promise<void>>(async () => {});
 
@@ -120,6 +121,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
 
   useEffect(() => {
     const identity = getVisitorIdentity();
+    setIsIosDevice(/iPhone|iPad|iPod/.test(navigator.userAgent));
     setVisitor({ id: identity.visitorId, nickname: identity.nickname });
     setNickname(identity.nickname);
     setNowMs(Date.now());
@@ -137,9 +139,12 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
 
   const handleInstall = async () => {
     if (installPrompt) {
-      await installPrompt.prompt();
-      await installPrompt.userChoice;
-      setInstallPrompt(null);
+      try {
+        await installPrompt.prompt();
+        await installPrompt.userChoice;
+      } finally {
+        setInstallPrompt(null);
+      }
       return;
     }
     toast.info("On iPhone or iPad, tap Share, then Add to Home Screen.", {
@@ -469,11 +474,10 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
       </div>
 
       <form onSubmit={handleAddTrack} className="flex gap-2 border-b border-line p-3 sm:p-4">
-        <label className="sr-only" htmlFor="track-link">YouTube or Spotify link</label>
         <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-background px-3 focus-within:border-neon/60">
           <Link2 className="h-4 w-4 shrink-0 text-muted-foreground" />
           <input
-            id="track-link"
+            aria-label="YouTube or Spotify link"
             type="url"
             inputMode="url"
             placeholder="Paste a YouTube or Spotify link"
@@ -524,21 +528,21 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
       <main className="tipsy-shell min-h-screen bg-background text-foreground">
         <header className="sticky top-0 z-30 border-b border-line/80 bg-background/95 backdrop-blur-xl">
           <div className="mx-auto flex h-[68px] max-w-[1320px] items-center justify-between gap-3 px-4 sm:px-8">
-            <button type="button" onClick={leaveRoom} className="group flex min-w-0 items-center gap-3 text-left" aria-label="Back to Tipsy Bar home">
+            <Button type="button" variant="ghost" onClick={leaveRoom} className="group flex h-auto min-w-0 items-center justify-start gap-3 p-0 text-left hover:bg-transparent" aria-label="Back to Tipsy Bar home">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-neon/30 bg-neon/10 text-neon"><Disc3 className="h-5 w-5" /></span>
               <span className="hidden min-w-0 sm:block">
                 <span className="block text-sm font-extrabold tracking-normal text-foreground">TIPSY <span className="text-neon">BAR</span></span>
                 <span className="block truncate text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Good music, better company</span>
               </span>
-            </button>
+            </Button>
 
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               <span className="flex items-center gap-2 rounded-full border border-line bg-panel px-3 py-2 text-xs font-semibold text-foreground">
                 <span className="live-dot" /> Live room
               </span>
-              <button type="button" onClick={() => void handleInvite()} className="hidden items-center gap-2 rounded-md border border-line bg-panel px-3 py-2 text-xs font-bold uppercase text-foreground transition-colors hover:border-neon/40 sm:flex" aria-label="Copy room code and invite link">
+              <Button type="button" variant="outline" size="sm" onClick={() => void handleInvite()} className="hidden h-10 items-center gap-2 border-line bg-panel px-3 text-xs font-bold uppercase text-foreground transition-colors hover:border-neon/40 sm:flex" aria-label="Copy room code and invite link">
                 <span className="text-muted-foreground">CODE</span><span className="font-mono text-neon">{room.code}</span><Clipboard className="h-3.5 w-3.5 text-muted-foreground" />
-              </button>
+              </Button>
               {inviteButton}
               <Button variant="ghost" size="icon" onClick={leaveRoom} className="text-muted-foreground hover:text-foreground" aria-label="Leave room"><ArrowLeft /></Button>
             </div>
@@ -631,7 +635,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
                   <Button variant="ghost" size="icon" onClick={() => void skipToNext()} disabled={queueTracks.length === 0} className="h-11 w-11 text-muted-foreground hover:text-foreground" aria-label="Play next song" title="Next track"><ChevronDown className="-rotate-90" /></Button>
                 </div>
                 <div className="hidden min-w-[132px] justify-end sm:flex">
-                  <button type="button" onClick={() => setQueueOpen(true)} className="flex items-center gap-2 text-xs font-semibold text-muted-foreground hover:text-foreground"><Music2 className="h-4 w-4 text-neon" /> {queueTracks.length} up next</button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setQueueOpen(true)} className="h-9 gap-2 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground"><Music2 className="h-4 w-4 text-neon" /> {queueTracks.length} up next</Button>
                 </div>
               </div>
               {currentTrack?.source === "spotify" ? <p className="mt-3 text-center text-xs leading-5 text-muted-foreground">Spotify playback uses its official player; the room can't control or sync that embed.</p> : null}
@@ -675,7 +679,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
             <span><span className="block text-base font-extrabold text-foreground">TIPSY <span className="text-neon">BAR</span></span><span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">The room is the dance floor</span></span>
           </div>
           <div className="flex items-center gap-2">
-            {(installPrompt || /iPhone|iPad|iPod/.test(typeof navigator === "undefined" ? "" : navigator.userAgent)) && <Button type="button" variant="outline" size="sm" onClick={() => void handleInstall()} className="h-9 border-line bg-panel px-3 text-xs text-foreground hover:border-neon/50 hover:bg-panel-raised">Install</Button>}
+              {(installPrompt || isIosDevice) && <Button type="button" variant="outline" size="sm" onClick={() => void handleInstall()} className="h-9 border-line bg-panel px-3 text-xs text-foreground hover:border-neon/50 hover:bg-panel-raised">Install</Button>}
             <span className="flex items-center gap-2 rounded-full border border-line bg-panel px-3 py-2 text-[11px] font-semibold text-muted-foreground"><span className="live-dot" /> Listening rooms</span>
           </div>
         </header>
