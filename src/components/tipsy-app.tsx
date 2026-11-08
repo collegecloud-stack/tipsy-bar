@@ -303,13 +303,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     else playYoutubeCommand("pauseVideo");
     try {
       await savePlayback(room.id, currentTrack.id, nextState, positionSeconds);
-      setPlayback({
-        room_id: room.id,
-        track_id: currentTrack.id,
-        is_playing: nextState,
-        position_seconds: positionSeconds,
-        updated_at: new Date().toISOString(),
-      });
+      setPlayback((await getRoomSnapshot(room.code, visitor?.id ?? ""))?.playback ?? null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Playback couldn't update for the room.");
     }
@@ -374,11 +368,13 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
       toast.success("Added to the room queue.");
       const latest = await getRoomSnapshot(room.code, visitor?.id ?? "");
       if (latest) {
-        setTracks(latest.tracks);
-        setPlayback(latest.playback);
         if (!latest.tracks.some((track) => track.position === 0)) {
           await chooseCurrentTrack(room.id, latest.tracks);
-          setPlayback({ room_id: room.id, track_id: latest.tracks[0]?.id ?? null, is_playing: false, position_seconds: 0, updated_at: new Date().toISOString() });
+        }
+        const refreshed = await getRoomSnapshot(room.code, visitor?.id ?? "");
+        if (refreshed) {
+          setTracks(refreshed.tracks);
+          setPlayback(refreshed.playback);
         }
       }
     } catch (error) {
