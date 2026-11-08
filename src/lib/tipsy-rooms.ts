@@ -40,11 +40,11 @@ export async function createRoom(name: string, nickname: string, visitorId: stri
     .single();
   if (roomError) throw roomError;
 
-  const member = await joinRoom(room.code, nickname, visitorId);
-  if (!member) throw new Error("The room was created, but your nickname could not join it.");
+  const joined = await joinRoom(room.code, nickname, visitorId);
+  if (!joined) throw new Error("The room was created, but your nickname could not join it.");
   const { error: hostError } = await supabase
     .from("rooms")
-    .update({ host_member_id: member.id })
+    .update({ host_member_id: joined.member.id })
     .eq("id", room.id);
   if (hostError) throw hostError;
   const { error: playbackError } = await supabase
@@ -52,7 +52,7 @@ export async function createRoom(name: string, nickname: string, visitorId: stri
     .upsert({ room_id: room.id, track_id: null, is_playing: false, position_seconds: 0 });
   if (playbackError) throw playbackError;
 
-  return { room, member };
+  return { room, member: joined.member };
 }
 
 export async function joinRoom(code: string, nickname: string, visitorId: string) {
@@ -125,7 +125,11 @@ export async function getRoomSnapshot(code: string, visitorId: string): Promise<
   };
 }
 
-export async function addTrack(roomId: string, memberId: string, track: TablesInsert<"room_tracks">) {
+export async function addTrack(
+  roomId: string,
+  memberId: string,
+  track: Omit<TablesInsert<"room_tracks">, "room_id" | "added_by" | "position">,
+) {
   const { data: currentTracks, error: listError } = await supabase
     .from("room_tracks")
     .select("position")
@@ -192,5 +196,12 @@ export async function moveQueueTrack(roomId: string, tracks: QueueTrack[], track
 
 export function playbackPosition(playback: RoomPlayback | null, nowMs: number): number {
   if (!playback) return 0;
-  return getSynchronizedPosition(playback, nowMs);
+  return getSynchronizedPosition(
+    {
+      isPlaying: playback.is_playing,
+      positionSeconds: playback.position_seconds,
+      updatedAt: playback.updated_at,
+    },
+    nowMs,
+  );
 }
