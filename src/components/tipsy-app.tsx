@@ -185,6 +185,29 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
 
   enterRoomRef.current = enterRoom;
 
+  // Monotonic request counter: only the newest snapshot request may write state.
+  const snapshotRequestRef = useRef(0);
+  const latestAppliedRef = useRef(0);
+  const fetchSnapshot = async () => {
+    const requestId = ++snapshotRequestRef.current;
+    const snapshot = room ? await getRoomSnapshot(room.code, visitor?.id ?? "") : null;
+    return { requestId, snapshot };
+  };
+  const applySnapshot = (
+    result: { requestId: number; snapshot: Awaited<ReturnType<typeof getRoomSnapshot>> },
+    parts: Array<"room" | "tracks" | "playback">,
+  ) => {
+    if (!result.snapshot || result.requestId < latestAppliedRef.current) return false;
+    latestAppliedRef.current = result.requestId;
+    if (parts.includes("room")) {
+      setRoom(result.snapshot.room);
+      setRoomName(result.snapshot.room.name);
+    }
+    if (parts.includes("tracks")) setTracks(result.snapshot.tracks);
+    if (parts.includes("playback")) setPlayback(result.snapshot.playback);
+    return true;
+  };
+
   useEffect(() => {
     if (!initialRoomCode || !visitor || !visitor.nickname.trim()) return;
     void enterRoomRef.current(initialRoomCode, visitor.nickname, visitor);
@@ -197,12 +220,9 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
 
     const refresh = async () => {
       try {
-        const snapshot = await getRoomSnapshot(room.code, visitor.id);
-        if (!active || !snapshot) return;
-        setRoom(snapshot.room);
-        setRoomName(snapshot.room.name);
-        setTracks(snapshot.tracks);
-        setPlayback(snapshot.playback);
+        const result = await fetchSnapshot();
+        if (!active) return;
+        applySnapshot(result, ["room", "tracks", "playback"]);
       } catch (error) {
         if (active) setErrorMessage(error instanceof Error ? error.message : "Couldn't refresh the room.");
       }
@@ -305,7 +325,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     }
     try {
       await savePlayback(room.id, currentTrack.id, nextState, positionSeconds);
-      await applySnapshot(await fetchSnapshot(), ["playback"]);
+      applySnapshot(await fetchSnapshot(), ["playback"]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Playback couldn't update for the room.");
     }
