@@ -213,7 +213,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     };
 
     const channel = supabase
-      .channel(`tipsy-room-${room.id}-${Math.random().toString(36).slice(2)}`)
+      .channel(`tipsy-room-${room.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "rooms", filter: `id=eq.${room.id}` }, scheduleRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "room_members", filter: `room_id=eq.${room.id}` }, scheduleRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "room_tracks", filter: `room_id=eq.${room.id}` }, scheduleRefresh)
@@ -297,13 +297,15 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
   };
 
   const togglePlayback = async () => {
-    if (!room || !currentTrack || currentTrack.source !== "youtube") return;
+    if (!room || !currentTrack) return;
     const nextState = !isPlaying;
-    if (nextState) playYoutubeCommand("playVideo");
-    else playYoutubeCommand("pauseVideo");
+    if (currentTrack.source === "youtube") {
+      if (nextState) playYoutubeCommand("playVideo");
+      else playYoutubeCommand("pauseVideo");
+    }
     try {
       await savePlayback(room.id, currentTrack.id, nextState, positionSeconds);
-      setPlayback((await getRoomSnapshot(room.code, visitor?.id ?? ""))?.playback ?? null);
+      await applySnapshot(await fetchSnapshot(), ["playback"]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Playback couldn't update for the room.");
     }
@@ -316,11 +318,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
       const next = queueTracks[0] ?? ordered.find((track) => track.id !== currentTrack?.id);
       if (next) {
         await chooseCurrentTrack(room.id, tracks, next.id);
-        const snapshot = await getRoomSnapshot(room.code, visitor?.id ?? "");
-        if (snapshot) {
-          setTracks(snapshot.tracks);
-          setPlayback(snapshot.playback);
-        }
+        applySnapshot(await fetchSnapshot(), ["tracks", "playback"]);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The next song couldn't start.");
@@ -366,16 +364,12 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
       });
       setTrackUrl("");
       toast.success("Added to the room queue.");
-      const latest = await getRoomSnapshot(room.code, visitor?.id ?? "");
-      if (latest) {
-        if (!latest.tracks.some((track) => track.position === 0)) {
-          await chooseCurrentTrack(room.id, latest.tracks);
+      const latest = await fetchSnapshot();
+      if (latest.snapshot) {
+        if (!latest.snapshot.tracks.some((track) => track.position === 0)) {
+          await chooseCurrentTrack(room.id, latest.snapshot.tracks);
         }
-        const refreshed = await getRoomSnapshot(room.code, visitor?.id ?? "");
-        if (refreshed) {
-          setTracks(refreshed.tracks);
-          setPlayback(refreshed.playback);
-        }
+        applySnapshot(await fetchSnapshot(), ["tracks", "playback"]);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "This track couldn't be added.");
@@ -388,8 +382,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     if (!room || !visitor) return;
     try {
       await toggleTrackVote(room.id, track.id, visitor.id, track.hasVoted);
-      const latest = await getRoomSnapshot(room.code, visitor.id);
-      if (latest) setTracks(latest.tracks);
+      applySnapshot(await fetchSnapshot(), ["tracks"]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Your vote couldn't be saved.");
     }
@@ -399,8 +392,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     if (!room) return;
     try {
       await moveQueueTrack(room.id, tracks, track.id, offset);
-      const latest = await getRoomSnapshot(room.code, visitor?.id ?? "");
-      if (latest) setTracks(latest.tracks);
+      applySnapshot(await fetchSnapshot(), ["tracks"]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The queue order couldn't change.");
     }
@@ -591,7 +583,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
               {currentTrack?.source === "youtube" ? (
                 <div className="mt-5 overflow-hidden rounded-md border border-line bg-background">
                   <iframe
-                    key={`${currentTrack.id}-${playback?.updated_at ?? "start"}`}
+                    key={currentTrack.id}
                     ref={frameRef}
                     title={`YouTube player for ${currentTrack.title}`}
                     src={youtubeSrc}
@@ -625,7 +617,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
                   <Button variant="ghost" size="icon" onClick={() => {
                     if (currentTrack && room) void savePlayback(room.id, currentTrack.id, isPlaying, 0).then(() => setPlayback({ room_id: room.id, track_id: currentTrack.id, is_playing: isPlaying, position_seconds: 0, updated_at: new Date().toISOString() }));
                   }} disabled={!currentTrack || currentTrack.source !== "youtube"} className="h-11 w-11 text-muted-foreground hover:text-foreground" aria-label="Restart current track" title="Restart track"><Music2 /></Button>
-                  <Button onClick={() => void togglePlayback()} disabled={!currentTrack || currentTrack.source !== "youtube"} size="icon" className="h-[58px] w-[58px] rounded-full bg-neon text-night shadow-[0_0_28px_var(--color-neon-glow)] hover:bg-neon/85" aria-label={isPlaying ? "Pause shared playback" : "Start shared playback"} title={isPlaying ? "Pause" : "Play"}>
+                  <Button onClick={() => void togglePlayback()} disabled={!currentTrack} size="icon" className="h-[58px] w-[58px] rounded-full bg-neon text-night shadow-[0_0_28px_var(--color-neon-glow)] hover:bg-neon/85" aria-label={isPlaying ? "Pause shared playback" : "Start shared playback"} title={isPlaying ? "Pause" : "Play"}>
                     {isPlaying ? <Pause className="h-6 w-6 fill-current" /> : <Play className="ml-1 h-6 w-6 fill-current" />}
                   </Button>
                   <Button variant="ghost" size="icon" onClick={() => void skipToNext()} disabled={queueTracks.length === 0} className="h-11 w-11 text-muted-foreground hover:text-foreground" aria-label="Play next song" title="Next track"><ChevronDown className="-rotate-90" /></Button>
@@ -634,7 +626,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
                   <Button type="button" variant="ghost" size="sm" onClick={() => setQueueOpen(true)} className="h-9 gap-2 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground"><Music2 className="h-4 w-4 text-neon" /> {queueTracks.length} up next</Button>
                 </div>
               </div>
-              {currentTrack?.source === "spotify" ? <p className="mt-3 text-center text-xs leading-5 text-muted-foreground">Spotify playback uses its official player; the room can't control or sync that embed.</p> : null}
+              {currentTrack?.source === "spotify" ? <p className="mt-3 text-center text-xs leading-5 text-muted-foreground">Spotify embeds need you to press play inside the Spotify player. The room button only updates the shared status; it isn't synced.</p> : null}
             </div>
 
             <div className="mt-5 flex w-full items-center justify-between gap-3 rounded-lg border border-line bg-panel px-4 py-3 xl:hidden">
