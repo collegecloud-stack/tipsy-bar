@@ -43,7 +43,8 @@ import {
   type RoomPlayback,
   type TipsyRoom,
 } from "@/lib/tipsy-rooms";
-import { getYouTubeEmbedUrl, orderQueueByVotes, parseTrackUrl } from "@/lib/tipsy";
+import { parseTrackUrl, splitTracks } from "@/lib/tipsy";
+import { loadYouTubeIframeApi, type YTPlayer } from "@/lib/youtube-iframe-api";
 import { supabase } from "@/integrations/supabase/client";
 
 type Visitor = { id: string; nickname: string };
@@ -104,20 +105,20 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
   const [errorMessage, setErrorMessage] = useState("");
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIosDevice, setIsIosDevice] = useState(false);
-  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [needsTap, setNeedsTap] = useState(false);
+  const playerHostRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<YTPlayer | null>(null);
+  const loadedVideoRef = useRef<string | null>(null);
+  const lastSeekAtRef = useRef(0);
+  const handleVideoEndedRef = useRef<() => void>(() => {});
   const enterRoomRef = useRef<(code: string, name: string, identity: Visitor) => Promise<void>>(async () => {});
 
-  const currentTrack = useMemo(
-    () => tracks.find((track) => track.position === 0) ?? null,
-    [tracks],
-  );
-  const queueTracks = useMemo(() => orderQueueByVotes(tracks).filter((track) => track.id !== currentTrack?.id), [tracks, currentTrack]);
+  // position 0 = playing now, > 0 = up next (by votes), < 0 = already played
+  const { current: currentTrack, upNext: queueTracks } = useMemo(() => splitTracks(tracks), [tracks]);
   const positionSeconds = playbackPosition(playback, nowMs);
   const isPlaying = playback?.is_playing ?? false;
-  const youtubeSrc = useMemo(() => {
-    if (!currentTrack || currentTrack.source !== "youtube") return "";
-    return getYouTubeEmbedUrl(currentTrack.source_id, playback?.position_seconds ?? 0, isPlaying);
-  }, [currentTrack?.id, playback?.updated_at, currentTrack?.source_id, isPlaying]);
+  const isYoutubeTrack = currentTrack?.source === "youtube";
 
   useEffect(() => {
     const identity = getVisitorIdentity();
@@ -266,18 +267,170 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     return () => window.clearInterval(interval);
   }, [room]);
 
+  // When a YouTube song ends, move the room to the next queued song. Every device sees the
+  // end, so one "leader" (lowest visitor id in the room) advances right away; the others wait
+  // and only step in if the room still hasn't moved on, so a song is never skipped twice.
+  const handleVideoEnded = () => {
+    const ended = currentTrack;
+    if (!room || !visitor || !ended) return;
+    const ids = [visitor.id, ...listeners.map((person) => person.visitor_id).filter((id): id is string => Boolean(id))];
+    const leaderId = [...ids].sort()[0];
+    const delay = leaderId === visitor.id ? 0 : 10000 + Math.random() * 1000;
+    window.setTimeout(() => {
+      void (async () => {
+        try {
+          const snapshot = await getRoomSnapshot(room.code, visitor.id);
+          if (!snapshot) return;
+          const { current, upNext } = splitTracks(snapshot.tracks);
+          if (!current || current.id !== ended.id) return; // someone else already moved on
+          const next = upNext[0];
+          if (next) await chooseCurrentTrack(room.id, snapshot.tracks, next.id, { autoplay: true });
+          else await savePlayback(room.id, current.id, false, 0);
+          applySnapshot(await fetchSnapshot(), ["tracks", "playback"]);
+        } catch {
+          // The Next button still works if auto-advance fails.
+        }
+      })();
+    }, delay);
+  };
+  handleVideoEndedRef.current = handleVideoEnded;
+
+  // One persistent official YouTube player. It is created once and never reloaded for
+  // play, pause or seek; track changes use loadVideoById.
   useEffect(() => {
-    if (!currentTrack || currentTrack.source !== "youtube" || !isPlaying || nowMs === 0) return;
+    if (!isYoutubeTrack) return;
+    let cancelled = false;
+    let created = null as YTPlayer | null;
+    setPlayerReady(false);
+    loadedVideoRef.current = null;
+    loadYouTubeIframeApi()
+      .then((YT) => {
+        const host = playerHostRef.current;
+        if (cancelled || !host) return;
+        host.innerHTML = "";
+        const mount = document.createElement("div");
+        host.appendChild(mount);
+        created = new YT.Player(mount, {
+          width: "100%",
+          height: "100%",
+          host: "https://www.youtube-nocookie.com",
+          playerVars: { playsinline: 1, controls: 0, disablekb: 1, rel: 0, modestbranding: 1, origin: window.location.origin },
+          events: {
+            onReady: (event) => {
+              if (cancelled) return;
+              playerRef.current = event.target;
+              setPlayerReady(true);
+            },
+            onStateChange: (event) => {
+              if (event.data === 1) setNeedsTap(false);
+              if (event.data === 0) handleVideoEndedRef.current();
+            },
+            onError: () => {
+              toast.error("This video can't be played here. Use Next to skip it.");
+            },
+          },
+        });
+      })
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : "The YouTube player couldn't load.");
+      });
+    return () => {
+      cancelled = true;
+      playerRef.current = null;
+      setPlayerReady(false);
+      setNeedsTap(false);
+      try {
+        created?.destroy();
+      } catch {
+        // Player already gone.
+      }
+      if (playerHostRef.current) playerHostRef.current.innerHTML = "";
+    };
+  }, [isYoutubeTrack]);
+
+  // A new playback row from the room is a command: play, pause, load a track, or seek.
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!playerReady || !player || !currentTrack || currentTrack.source !== "youtube") return;
+    if (playback && playback.track_id !== currentTrack.id) return; // wait for the matching playback row
+    const expected = playbackPosition(playback, Date.now());
+    if (loadedVideoRef.current !== currentTrack.source_id) {
+      loadedVideoRef.current = currentTrack.source_id;
+      lastSeekAtRef.current = Date.now();
+      if (isPlaying) player.loadVideoById({ videoId: currentTrack.source_id, startSeconds: expected });
+      else player.cueVideoById({ videoId: currentTrack.source_id, startSeconds: expected });
+    } else if (isPlaying) {
+      if (Math.abs(player.getCurrentTime() - expected) > 2) {
+        player.seekTo(expected, true);
+        lastSeekAtRef.current = Date.now();
+      }
+      player.playVideo();
+    } else {
+      player.pauseVideo();
+      const resumeAt = playback?.position_seconds ?? 0;
+      if (Math.abs(player.getCurrentTime() - resumeAt) > 2) player.seekTo(resumeAt, true);
+    }
+    if (!isPlaying) return;
+    // Phones can block autoplay without a tap: offer one clear button instead of silence.
+    const timer = window.setTimeout(() => {
+      const state = playerRef.current?.getPlayerState();
+      if (state !== undefined && state !== 1 && state !== 3) setNeedsTap(true);
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [playerReady, currentTrack?.id, currentTrack?.source_id, playback?.updated_at, isPlaying]);
+
+  // Gentle drift correction between commands. Smooth audio beats tight sync: only act when
+  // clearly off, never while buffering, and at most once every 30 seconds.
+  useEffect(() => {
+    if (!playerReady || !isPlaying || !isYoutubeTrack) return;
     const interval = window.setInterval(() => {
-      if (!playback) return;
+      const player = playerRef.current;
+      if (!player || !playback || playback.track_id !== currentTrack?.id) return;
+      if (player.getPlayerState() !== 1) return;
+      if (Date.now() - lastSeekAtRef.current < 30000) return;
       const expected = playbackPosition(playback, Date.now());
-      frameRef.current?.contentWindow?.postMessage(
-        JSON.stringify({ event: "command", func: "seekTo", args: [expected, true] }),
-        "https://www.youtube-nocookie.com",
-      );
-    }, 12000);
+      if (Math.abs(player.getCurrentTime() - expected) > 8) {
+        player.seekTo(expected, true);
+        lastSeekAtRef.current = Date.now();
+      }
+    }, 5000);
     return () => window.clearInterval(interval);
-  }, [currentTrack?.id, isPlaying, playback?.updated_at, nowMs > 0]);
+  }, [playerReady, isPlaying, isYoutubeTrack, playback?.updated_at, currentTrack?.id]);
+
+  // Keep the screen awake while music plays so the phone doesn't lock mid-song.
+  // (It can't keep audio going if you lock the phone yourself or switch apps.)
+  useEffect(() => {
+    if (!room || !isPlaying) return;
+    type WakeLockSentinelLike = { release: () => Promise<void> };
+    const wakeLock = (navigator as Navigator & { wakeLock?: { request: (type: "screen") => Promise<WakeLockSentinelLike> } }).wakeLock;
+    if (!wakeLock) return;
+    let cancelled = false;
+    let sentinel = null as WakeLockSentinelLike | null;
+    const acquire = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const lock = await wakeLock.request("screen");
+        if (cancelled) {
+          void lock.release().catch(() => {});
+          return;
+        }
+        void sentinel?.release().catch(() => {});
+        sentinel = lock;
+      } catch {
+        // Wake lock is a nice-to-have.
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void acquire();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    void acquire();
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      void sentinel?.release().catch(() => {});
+    };
+  }, [room?.id, isPlaying]);
 
   const createNewRoom = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -309,35 +462,44 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     await enterRoom(roomCodeInput, nickname, visitor);
   };
 
-  const playYoutubeCommand = (command: "playVideo" | "pauseVideo") => {
-    frameRef.current?.contentWindow?.postMessage(
-      JSON.stringify({ event: "command", func: command, args: [] }),
-      "https://www.youtube-nocookie.com",
-    );
-  };
-
   const togglePlayback = async () => {
     if (!room || !currentTrack) return;
     const nextState = !isPlaying;
-    if (currentTrack.source === "youtube") {
-      if (nextState) playYoutubeCommand("playVideo");
-      else playYoutubeCommand("pauseVideo");
+    const player = isYoutubeTrack && playerReady ? playerRef.current : null;
+    let position = positionSeconds;
+    if (player) {
+      // Called straight from the tap, so phones allow the audio to start.
+      if (nextState) {
+        player.playVideo();
+        setNeedsTap(false);
+      } else {
+        if (player.getPlayerState() === 1) position = player.getCurrentTime(); // pause where you really are
+        player.pauseVideo();
+      }
     }
     try {
-      await savePlayback(room.id, currentTrack.id, nextState, positionSeconds);
+      await savePlayback(room.id, currentTrack.id, nextState, position);
       applySnapshot(await fetchSnapshot(), ["playback"]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Playback couldn't update for the room.");
     }
   };
 
+  const startAudio = () => {
+    const player = playerRef.current;
+    if (!player) return;
+    player.seekTo(playbackPosition(playback, Date.now()), true);
+    lastSeekAtRef.current = Date.now();
+    player.playVideo();
+    setNeedsTap(false);
+  };
+
   const skipToNext = async () => {
-    if (!room || tracks.length === 0) return;
+    if (!room) return;
     try {
-      const ordered = orderQueueByVotes(tracks);
-      const next = queueTracks[0] ?? ordered.find((track) => track.id !== currentTrack?.id);
+      const next = queueTracks[0];
       if (next) {
-        await chooseCurrentTrack(room.id, tracks, next.id);
+        await chooseCurrentTrack(room.id, tracks, next.id, { autoplay: true });
         applySnapshot(await fetchSnapshot(), ["tracks", "playback"]);
       }
     } catch (error) {
@@ -470,7 +632,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
       <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-4 sm:px-5">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-neon">Up next</p>
-          <h2 className="mt-1 text-lg font-semibold text-foreground">The queue <span className="text-sm font-medium text-muted-foreground">{tracks.length}</span></h2>
+          <h2 className="mt-1 text-lg font-semibold text-foreground">The queue <span className="text-sm font-medium text-muted-foreground">{queueTracks.length}</span></h2>
         </div>
         <Button
           variant="ghost"
@@ -602,16 +764,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
 
               {currentTrack?.source === "youtube" ? (
                 <div className="mt-5 overflow-hidden rounded-md border border-line bg-background">
-                  <iframe
-                    key={currentTrack.id}
-                    ref={frameRef}
-                    title={`YouTube player for ${currentTrack.title}`}
-                    src={youtubeSrc}
-                    className="aspect-video w-full border-0"
-                    allow="autoplay; encrypted-media; picture-in-picture; web-share"
-                    allowFullScreen
-                    referrerPolicy="strict-origin-when-cross-origin"
-                  />
+                  <div ref={playerHostRef} role="region" aria-label={`YouTube player for ${currentTrack.title}`} className="aspect-video w-full [&>iframe]:h-full [&>iframe]:w-full" />
                 </div>
               ) : currentTrack?.source === "spotify" ? (
                 <div className="mt-5 overflow-hidden rounded-md border border-line bg-background">
@@ -622,6 +775,12 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
                   <div><Headphones className="mx-auto h-8 w-8 text-neon" /><p className="mt-2 text-sm font-semibold text-foreground">A song away from a good time</p><p className="mt-1 text-xs text-muted-foreground">Drop a YouTube or Spotify link into the queue.</p></div>
                 </div>
               )}
+
+              {needsTap && isPlaying && currentTrack?.source === "youtube" ? (
+                <Button onClick={startAudio} className="mt-4 h-12 w-full rounded-md bg-neon text-sm font-extrabold text-night hover:bg-neon/85">
+                  <Play className="fill-current" /> Tap to start audio
+                </Button>
+              ) : null}
 
               <div className="mt-5 flex items-center justify-between gap-4 text-xs tabular-nums text-muted-foreground">
                 <span>{formatClock(positionSeconds)}</span>
@@ -654,7 +813,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-neon/10 text-neon"><UsersRound className="h-4 w-4" /></span>
                 <div className="min-w-0"><p className="text-xs font-semibold text-foreground">Listening together</p><p className="truncate text-[11px] text-muted-foreground">{activeListeners.map((person) => person.nickname).join(", ")}</p></div>
               </div>
-              <Button variant="outline" size="sm" onClick={() => setQueueOpen(true)} className="shrink-0 border-line bg-background text-foreground hover:border-neon/50"><Music2 className="h-4 w-4" /> Queue <span className="text-neon">{tracks.length}</span></Button>
+              <Button variant="outline" size="sm" onClick={() => setQueueOpen(true)} className="shrink-0 border-line bg-background text-foreground hover:border-neon/50"><Music2 className="h-4 w-4" /> Queue <span className="text-neon">{queueTracks.length}</span></Button>
             </div>
           </section>
 

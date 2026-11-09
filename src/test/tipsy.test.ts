@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getSynchronizedPosition, orderQueueByVotes, parseTrackUrl } from "@/lib/tipsy";
+import { getSynchronizedPosition, orderQueueByVotes, parseTrackUrl, planTrackAdvance, splitTracks } from "@/lib/tipsy";
 
 describe("Tipsy Bar room rules", () => {
   it("accepts YouTube and Spotify track links but rejects unsupported providers", () => {
@@ -24,6 +24,33 @@ describe("Tipsy Bar room rules", () => {
     expect(
       getSynchronizedPosition({ ...started, isPlaying: false }, Date.parse(started.updatedAt) + 6500),
     ).toBe(42);
+  });
+
+  it("moves through the queue without ever replaying a finished song", () => {
+    type T = { id: string; position: number; voteCount: number; added_at: string };
+    let tracks: T[] = [
+      { id: "a", position: 0, voteCount: 0, added_at: "2026-01-01T00:00:01Z" },
+      { id: "b", position: 1, voteCount: 0, added_at: "2026-01-01T00:00:02Z" },
+      { id: "c", position: 2, voteCount: 5, added_at: "2026-01-01T00:00:03Z" },
+    ];
+    const apply = (plan: { orderedIds: string[]; startPosition: number }) => {
+      tracks = tracks.map((track) => ({ ...track, position: plan.startPosition + plan.orderedIds.indexOf(track.id) }));
+    };
+    const playedOrder: string[] = [];
+    for (let step = 0; step < 2; step += 1) {
+      const next = splitTracks(tracks).upNext[0];
+      expect(next).toBeDefined();
+      const plan = planTrackAdvance(tracks, next?.id);
+      expect(plan).not.toBeNull();
+      if (plan) apply(plan);
+      playedOrder.push(splitTracks(tracks).current?.id ?? "");
+    }
+    // c has the most votes so it goes first, then b; a (already played) never comes back.
+    expect(playedOrder).toEqual(["c", "b"]);
+    const { current, upNext, played } = splitTracks(tracks);
+    expect(current?.id).toBe("b");
+    expect(upNext).toEqual([]);
+    expect(played.map((track) => track.id)).toEqual(["a", "c"]);
   });
 
   it("does not advance shared time while a newly selected track is paused", () => {

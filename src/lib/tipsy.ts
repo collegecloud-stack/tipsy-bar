@@ -93,3 +93,36 @@ export function getYouTubeEmbedUrl(videoId: string, startSeconds: number, isPlay
   if (typeof window !== "undefined") url.searchParams.set("origin", window.location.origin);
   return url.toString();
 }
+/**
+ * Queue model (positions live in room_tracks.position, no schema change needed):
+ *   position  0  -> the track playing now
+ *   position  >0 -> "Up next", ranked by votes
+ *   position  <0 -> already played (history); never queued again automatically
+ */
+export function splitTracks<T extends OrderedVote>(tracks: T[]) {
+  const current = tracks.find((track) => track.position === 0) ?? null;
+  const upNext = orderQueueByVotes(tracks.filter((track) => track.position > 0));
+  const played = tracks.filter((track) => track.position < 0).sort((a, b) => a.position - b.position);
+  return { current, upNext, played };
+}
+
+/**
+ * Plans the move to the next current track. The previous current track is archived
+ * with a negative position instead of going back to the top of the queue.
+ * Returns the full ordered id list and the position the first id should get, so a
+ * single set_room_track_positions call can apply it atomically.
+ */
+export function planTrackAdvance<T extends OrderedVote>(tracks: T[], requestedId?: string) {
+  const { current, upNext, played } = splitTracks(tracks);
+  const requested = requestedId ? tracks.find((track) => track.id === requestedId) : undefined;
+  const nextCurrent = requested ?? upNext[0] ?? current ?? played[played.length - 1] ?? null;
+  if (!nextCurrent) return null;
+  const retired = current && current.id !== nextCurrent.id ? [current] : [];
+  const archive = [...played.filter((track) => track.id !== nextCurrent.id), ...retired];
+  const rest = upNext.filter((track) => track.id !== nextCurrent.id);
+  return {
+    nextCurrent,
+    orderedIds: [...archive, nextCurrent, ...rest].map((track) => track.id),
+    startPosition: -archive.length,
+  };
+}

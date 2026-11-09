@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables, TablesInsert } from "@/integrations/supabase/types";
-import { getSynchronizedPosition, orderQueueByVotes } from "@/lib/tipsy";
+import { getSynchronizedPosition, planTrackAdvance, splitTracks } from "@/lib/tipsy";
 
 export type TipsyRoom = Tables<"rooms">;
 export type RoomMember = Tables<"room_members">;
@@ -163,31 +163,30 @@ export async function savePlayback(roomId: string, trackId: string | null, isPla
   return data;
 }
 
-export async function chooseCurrentTrack(roomId: string, tracks: QueueTrack[], requestedTrackId?: string) {
-  const ranked = orderQueueByVotes(tracks);
-  const current = requestedTrackId ? ranked.find((track) => track.id === requestedTrackId) : undefined;
-  const nextCurrent = current ?? ranked.find((track) => track.position !== 0) ?? ranked[0];
-  const rest = ranked.filter((track) => track.id !== nextCurrent?.id);
-  const updates = [
-    ...(nextCurrent ? [{ ...nextCurrent, position: 0 }] : []),
-    ...rest.map((track, index) => ({ ...track, position: index + 1 })),
-  ];
-
-  if (updates.length > 0) {
-    // Current track first (position 0), the rest from 1, in one transaction.
+export async function chooseCurrentTrack(
+  roomId: string,
+  tracks: QueueTrack[],
+  requestedTrackId?: string,
+  options: { autoplay?: boolean } = {},
+) {
+  const plan = planTrackAdvance(tracks, requestedTrackId);
+  if (plan) {
+    // One transaction: played tracks get negative positions (history), the new current
+    // track gets 0, and "Up next" keeps counting from 1. A finished track never goes
+    // back to the top of the queue.
     const { error } = await supabase.rpc("set_room_track_positions", {
       p_room_id: roomId,
-      p_track_ids: updates.map((track) => track.id),
-      p_start_position: 0,
+      p_track_ids: plan.orderedIds,
+      p_start_position: plan.startPosition,
     });
     if (error) throw error;
   }
 
-  await savePlayback(roomId, nextCurrent?.id ?? null, false, 0);
+  await savePlayback(roomId, plan?.nextCurrent.id ?? null, Boolean(plan && options.autoplay), 0);
 }
 
 export async function moveQueueTrack(roomId: string, tracks: QueueTrack[], trackId: string, offset: -1 | 1) {
-  const ordered = orderQueueByVotes(tracks).filter((track) => track.position !== 0);
+  const ordered = splitTracks(tracks).upNext;
   const index = ordered.findIndex((track) => track.id === trackId);
   const targetIndex = index + offset;
   if (index < 0 || targetIndex < 0 || targetIndex >= ordered.length) return;
