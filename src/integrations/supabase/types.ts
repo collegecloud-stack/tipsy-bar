@@ -221,7 +221,46 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      add_room_track: {
+        Args: {
+          p_added_by: string
+          p_artist: string
+          p_artwork_url: string
+          p_room_id: string
+          p_source: string
+          p_source_id: string
+          p_title: string
+          p_track_url: string
+        }
+        Returns: {
+          added_at: string
+          added_by: string | null
+          artist: string
+          artwork_url: string | null
+          duration_seconds: number | null
+          id: string
+          position: number
+          room_id: string
+          source: string
+          source_id: string
+          title: string
+          track_url: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "room_tracks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      set_room_track_positions: {
+        Args: {
+          p_room_id: string
+          p_start_position: number
+          p_track_ids: string[]
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never

@@ -130,18 +130,17 @@ export async function addTrack(
   memberId: string,
   track: Omit<TablesInsert<"room_tracks">, "room_id" | "added_by" | "position">,
 ) {
-  const { data: currentTracks, error: listError } = await supabase
-    .from("room_tracks")
-    .select("position")
-    .eq("room_id", roomId);
-  if (listError) throw listError;
-  const position = Math.max(0, ...((currentTracks ?? []).map((item) => item.position))) + 1;
-  const { error } = await supabase.from("room_tracks").insert({
-    ...track,
-    room_id: roomId,
-    added_by: memberId,
-    position,
-  });
+  // Position is assigned atomically in the database (serialized per room).
+  const { error } = await supabase.rpc("add_room_track", {
+    p_room_id: roomId,
+    p_added_by: memberId,
+    p_source: track.source,
+    p_source_id: track.source_id,
+    p_track_url: track.track_url,
+    p_title: track.title,
+    p_artist: track.artist ?? "Unknown artist",
+    p_artwork_url: track.artwork_url ?? null,
+  } as never);
   if (error) throw error;
 }
 
@@ -174,8 +173,13 @@ export async function chooseCurrentTrack(roomId: string, tracks: QueueTrack[], r
     ...rest.map((track, index) => ({ ...track, position: index + 1 })),
   ];
 
-  for (const track of updates) {
-    const { error } = await supabase.from("room_tracks").update({ position: track.position }).eq("id", track.id);
+  if (updates.length > 0) {
+    // Current track first (position 0), the rest from 1, in one transaction.
+    const { error } = await supabase.rpc("set_room_track_positions", {
+      p_room_id: roomId,
+      p_track_ids: updates.map((track) => track.id),
+      p_start_position: 0,
+    });
     if (error) throw error;
   }
 
@@ -192,10 +196,13 @@ export async function moveQueueTrack(roomId: string, tracks: QueueTrack[], track
   if (!selected || !target) return;
   ordered[index] = target;
   ordered[targetIndex] = selected;
-  for (const [position, track] of ordered.entries()) {
-    const { error } = await supabase.from("room_tracks").update({ position: position + 1 }).eq("id", track.id);
-    if (error) throw error;
-  }
+  // Current track (position 0) is excluded and stays pinned; queue starts at 1.
+  const { error } = await supabase.rpc("set_room_track_positions", {
+    p_room_id: roomId,
+    p_track_ids: ordered.map((track) => track.id),
+    p_start_position: 1,
+  });
+  if (error) throw error;
 }
 
 export function playbackPosition(playback: RoomPlayback | null, nowMs: number): number {
