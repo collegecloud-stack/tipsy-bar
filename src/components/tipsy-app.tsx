@@ -46,6 +46,8 @@ import {
 import { parseTrackUrl, splitTracks } from "@/lib/tipsy";
 import { loadYouTubeIframeApi, type YTPlayer } from "@/lib/youtube-iframe-api";
 import { supabase } from "@/integrations/supabase/client";
+import { SpotifyLibrary, useSpotifyConnected } from "@/components/spotify-library";
+import { remotePause, remotePlay, type SpotifyTrackItem } from "@/lib/spotify";
 
 type Visitor = { id: string; nickname: string };
 type PresenceMember = { visitor_id?: string; nickname?: string };
@@ -119,6 +121,24 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
   const positionSeconds = playbackPosition(playback, nowMs);
   const isPlaying = playback?.is_playing ?? false;
   const isYoutubeTrack = currentTrack?.source === "youtube";
+  const spotifyConnected = useSpotifyConnected();
+  const spotifyRemoteKeyRef = useRef("");
+
+  // Spotify remote: when the room's state changes, tell this listener's own Spotify app to match it.
+  useEffect(() => {
+    if (!spotifyConnected || !playback) return;
+    const isSpotify = currentTrack?.source === "spotify";
+    const key = `${currentTrack?.id ?? ""}|${playback.is_playing}|${playback.updated_at}`;
+    if (spotifyRemoteKeyRef.current === key) return;
+    const previous = spotifyRemoteKeyRef.current;
+    spotifyRemoteKeyRef.current = key;
+    if (isSpotify && playback.is_playing && currentTrack) {
+      const seconds = playbackPosition(playback, Date.now());
+      remotePlay(currentTrack.source_id, seconds * 1000).catch((error: Error) => toast.error(error.message));
+    } else if (previous) {
+      void remotePause();
+    }
+  }, [spotifyConnected, currentTrack, playback]);
 
   useEffect(() => {
     const identity = getVisitorIdentity();
@@ -560,6 +580,30 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
     }
   };
 
+  const handleAddSpotifyTracks = async (items: SpotifyTrackItem[]) => {
+    if (!room || !member) return;
+    try {
+      for (const item of items) {
+        await addTrack(room.id, member.id, {
+          source: "spotify",
+          source_id: item.id,
+          track_url: item.url,
+          title: item.title,
+          artist: item.artist,
+          artwork_url: item.artworkUrl,
+        });
+      }
+      toast.success(items.length === 1 ? "Added to the room queue." : `Added ${items.length} songs to the room queue.`);
+      const latest = await fetchSnapshot();
+      if (latest.snapshot && !latest.snapshot.tracks.some((track) => track.position === 0)) {
+        await chooseCurrentTrack(room.id, latest.snapshot.tracks);
+      }
+      applySnapshot(await fetchSnapshot(), ["tracks", "playback"]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "These songs couldn't be added.");
+    }
+  };
+
   const handleVote = async (track: QueueTrack) => {
     if (!room || !visitor) return;
     try {
@@ -660,6 +704,8 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
           {busy ? <LoaderCircle className="animate-spin" /> : <Plus />}
         </Button>
       </form>
+
+      <SpotifyLibrary onAdd={handleAddSpotifyTracks} />
 
       <div className="queue-scroll min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {queueTracks.length === 0 ? (
@@ -805,7 +851,7 @@ export function TipsyApp({ initialRoomCode = "" }: TipsyAppProps) {
                   <Button type="button" variant="ghost" size="sm" onClick={() => setQueueOpen(true)} className="h-9 gap-2 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground"><Music2 className="h-4 w-4 text-neon" /> {queueTracks.length} up next</Button>
                 </div>
               </div>
-              {currentTrack?.source === "spotify" ? <p className="mt-3 text-center text-xs leading-5 text-muted-foreground">Spotify embeds need you to press play inside the Spotify player. The room button only updates the shared status; it isn't synced.</p> : null}
+              {currentTrack?.source === "spotify" ? <p className="mt-3 text-center text-xs leading-5 text-muted-foreground">{spotifyConnected ? "Spotify linked: the room controls your open Spotify app (Premium). Keep Spotify open on any device." : "Connect Spotify (Premium) in the queue to have the room play this on your Spotify app; otherwise press play inside the embed."}</p> : null}
             </div>
 
             <div className="mt-5 flex w-full items-center justify-between gap-3 rounded-lg border border-line bg-panel px-4 py-3 xl:hidden">
