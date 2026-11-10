@@ -33,3 +33,4 @@ use the editor.
 - Keep `/` as the guest-first Tipsy Bar start page and use public shareable room URLs; no login is required until saved accounts are explicitly approved.
 - Persist shared room state in Lovable Cloud and subscribe through the browser client; keep source playback within official provider embeds rather than extracting or proxying streams.
 - Installability is manifest-only: do not add offline caches or a service worker unless offline behavior is requested.
+- Spotify integration is browser-only PKCE (src/lib/spotify.ts); tokens stay in each listener's localStorage and each linked browser remote-controls its own Spotify app from room playback state — no server-side Spotify tokens, keeping guest rooms account-free.
