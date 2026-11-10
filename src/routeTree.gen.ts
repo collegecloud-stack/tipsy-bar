@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RoomCodeRouteImport } from './routes/room.$code'
+import { Route as AuthSpotifyCallbackRouteImport } from './routes/auth.spotify.callback'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,31 +23,40 @@ const RoomCodeRoute = RoomCodeRouteImport.update({
   path: '/room/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthSpotifyCallbackRoute = AuthSpotifyCallbackRouteImport.update({
+  id: '/auth/spotify/callback',
+  path: '/auth/spotify/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/room/$code': typeof RoomCodeRoute
+  '/auth/spotify/callback': typeof AuthSpotifyCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/room/$code': typeof RoomCodeRoute
+  '/auth/spotify/callback': typeof AuthSpotifyCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/room/$code': typeof RoomCodeRoute
+  '/auth/spotify/callback': typeof AuthSpotifyCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/room/$code'
+  fullPaths: '/' | '/room/$code' | '/auth/spotify/callback'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/room/$code'
-  id: '__root__' | '/' | '/room/$code'
+  to: '/' | '/room/$code' | '/auth/spotify/callback'
+  id: '__root__' | '/' | '/room/$code' | '/auth/spotify/callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   RoomCodeRoute: typeof RoomCodeRoute
+  AuthSpotifyCallbackRoute: typeof AuthSpotifyCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -65,12 +75,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RoomCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth/spotify/callback': {
+      id: '/auth/spotify/callback'
+      path: '/auth/spotify/callback'
+      fullPath: '/auth/spotify/callback'
+      preLoaderRoute: typeof AuthSpotifyCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   RoomCodeRoute: RoomCodeRoute,
+  AuthSpotifyCallbackRoute: AuthSpotifyCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
