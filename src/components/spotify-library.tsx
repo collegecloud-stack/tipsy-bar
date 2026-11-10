@@ -38,10 +38,10 @@ export function SpotifyLibrary({ onAdd }: { onAdd: (tracks: SpotifyTrackItem[]) 
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
 
-  const run = async <T,>(fn: () => Promise<T>) => {
+  const run = async <T,>(fn: () => Promise<T>): Promise<void> => {
     setLoading(true);
     try {
-      return await fn();
+      await fn();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Spotify request failed.");
     } finally {
@@ -59,7 +59,10 @@ export function SpotifyLibrary({ onAdd }: { onAdd: (tracks: SpotifyTrackItem[]) 
   }, [connected, tab, playlists]);
 
   const add = async (list: SpotifyTrackItem[]) => {
-    if (!list.length) return toast.error("Nothing to add.");
+    if (!list.length) {
+      toast.error("Nothing to add.");
+      return;
+    }
     setAdding(true);
     try {
       await onAdd(list);
